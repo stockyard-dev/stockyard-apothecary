@@ -22,5 +22,24 @@ func now()string{return time.Now().UTC().Format(time.RFC3339)}
 func(d *DB)Create(e *Medication)error{e.ID=genID();e.CreatedAt=now();_,err:=d.db.Exec(`INSERT INTO medications(id,name,dosage,frequency,prescriber,pharmacy,refill_date,notes,active,created_at)VALUES(?,?,?,?,?,?,?,?,?,?)`,e.ID,e.Name,e.Dosage,e.Frequency,e.Prescriber,e.Pharmacy,e.RefillDate,e.Notes,e.Active,e.CreatedAt);return err}
 func(d *DB)Get(id string)*Medication{var e Medication;if d.db.QueryRow(`SELECT id,name,dosage,frequency,prescriber,pharmacy,refill_date,notes,active,created_at FROM medications WHERE id=?`,id).Scan(&e.ID,&e.Name,&e.Dosage,&e.Frequency,&e.Prescriber,&e.Pharmacy,&e.RefillDate,&e.Notes,&e.Active,&e.CreatedAt)!=nil{return nil};return &e}
 func(d *DB)List()[]Medication{rows,_:=d.db.Query(`SELECT id,name,dosage,frequency,prescriber,pharmacy,refill_date,notes,active,created_at FROM medications ORDER BY created_at DESC`);if rows==nil{return nil};defer rows.Close();var o []Medication;for rows.Next(){var e Medication;rows.Scan(&e.ID,&e.Name,&e.Dosage,&e.Frequency,&e.Prescriber,&e.Pharmacy,&e.RefillDate,&e.Notes,&e.Active,&e.CreatedAt);o=append(o,e)};return o}
+func(d *DB)Update(e *Medication)error{_,err:=d.db.Exec(`UPDATE medications SET name=?,dosage=?,frequency=?,prescriber=?,pharmacy=?,refill_date=?,notes=?,active=? WHERE id=?`,e.Name,e.Dosage,e.Frequency,e.Prescriber,e.Pharmacy,e.RefillDate,e.Notes,e.Active,e.ID);return err}
 func(d *DB)Delete(id string)error{_,err:=d.db.Exec(`DELETE FROM medications WHERE id=?`,id);return err}
 func(d *DB)Count()int{var n int;d.db.QueryRow(`SELECT COUNT(*) FROM medications`).Scan(&n);return n}
+
+func(d *DB)Search(q string, filters map[string]string)[]Medication{
+    where:="1=1"
+    args:=[]any{}
+    if q!=""{
+        where+=" AND (name LIKE ?)"
+        args=append(args,"%"+q+"%");
+    }
+    if v,ok:=filters["active"];ok&&v!=""{where+=" AND active=?";args=append(args,v)}
+    rows,_:=d.db.Query(`SELECT id,name,dosage,frequency,prescriber,pharmacy,refill_date,notes,active,created_at FROM medications WHERE `+where+` ORDER BY created_at DESC`,args...)
+    if rows==nil{return nil};defer rows.Close()
+    var o []Medication;for rows.Next(){var e Medication;rows.Scan(&e.ID,&e.Name,&e.Dosage,&e.Frequency,&e.Prescriber,&e.Pharmacy,&e.RefillDate,&e.Notes,&e.Active,&e.CreatedAt);o=append(o,e)};return o
+}
+
+func(d *DB)Stats()map[string]any{
+    m:=map[string]any{"total":d.Count()}
+    return m
+}
