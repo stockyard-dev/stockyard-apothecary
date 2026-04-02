@@ -1,12 +1,23 @@
 package store
-import("database/sql";"fmt";"os";"path/filepath";"time";_ "modernc.org/sqlite")
-type DB struct{*sql.DB}
-type Medication struct{ID int64 `json:"id"`;Name string `json:"name"`;Dosage string `json:"dosage"`;Frequency string `json:"frequency"`;Active bool `json:"active"`;Notes string `json:"notes"`;CreatedAt time.Time `json:"created_at"`}
-type Entry struct{ID int64 `json:"id"`;Type string `json:"type"`;Description string `json:"description"`;Value string `json:"value"`;Unit string `json:"unit"`;Date string `json:"date"`;Notes string `json:"notes"`;CreatedAt time.Time `json:"created_at"`}
-func Open(d string)(*DB,error){os.MkdirAll(d,0755);dsn:=filepath.Join(d,"apothecary.db")+"?_journal_mode=WAL&_busy_timeout=5000";db,err:=sql.Open("sqlite",dsn);if err!=nil{return nil,fmt.Errorf("open: %w",err)};db.SetMaxOpenConns(1);migrate(db);return &DB{db},nil}
-func migrate(db *sql.DB){db.Exec(`CREATE TABLE IF NOT EXISTS medications(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,dosage TEXT DEFAULT '',frequency TEXT DEFAULT '',active INTEGER DEFAULT 1,notes TEXT DEFAULT '',created_at DATETIME DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS entries(id INTEGER PRIMARY KEY AUTOINCREMENT,type TEXT NOT NULL,description TEXT NOT NULL,value TEXT DEFAULT '',unit TEXT DEFAULT '',date TEXT DEFAULT '',notes TEXT DEFAULT '',created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)}
-func(db *DB)CreateMedication(m *Medication)error{act:=1;if !m.Active{act=0};res,err:=db.Exec(`INSERT INTO medications(name,dosage,frequency,active,notes)VALUES(?,?,?,?,?)`,m.Name,m.Dosage,m.Frequency,act,m.Notes);if err!=nil{return err};m.ID,_=res.LastInsertId();return nil}
-func(db *DB)ListMedications()([]Medication,error){rows,_:=db.Query(`SELECT id,name,dosage,frequency,active,notes,created_at FROM medications ORDER BY name`);defer rows.Close();var out[]Medication;for rows.Next(){var m Medication;var act int;rows.Scan(&m.ID,&m.Name,&m.Dosage,&m.Frequency,&act,&m.Notes,&m.CreatedAt);m.Active=act==1;out=append(out,m)};return out,nil}
-func(db *DB)LogEntry(e *Entry)error{res,err:=db.Exec(`INSERT INTO entries(type,description,value,unit,date,notes)VALUES(?,?,?,?,?,?)`,e.Type,e.Description,e.Value,e.Unit,e.Date,e.Notes);if err!=nil{return err};e.ID,_=res.LastInsertId();return nil}
-func(db *DB)ListEntries(typ string)([]Entry,error){q:=`SELECT id,type,description,value,unit,date,notes,created_at FROM entries WHERE 1=1`;args:=[]interface{}{};if typ!=""{q+=` AND type=?`;args=append(args,typ)};q+=` ORDER BY date DESC,created_at DESC LIMIT 200`;rows,err:=db.Query(q,args...);if err!=nil{return nil,err};defer rows.Close();var out[]Entry;for rows.Next(){var e Entry;rows.Scan(&e.ID,&e.Type,&e.Description,&e.Value,&e.Unit,&e.Date,&e.Notes,&e.CreatedAt);out=append(out,e)};return out,nil}
-func(db *DB)Stats()(map[string]interface{},error){var meds,entries int;db.QueryRow(`SELECT COUNT(*) FROM medications WHERE active=1`).Scan(&meds);db.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&entries);return map[string]interface{}{"active_medications":meds,"total_entries":entries},nil}
+import ("database/sql";"fmt";"os";"path/filepath";"time";_ "modernc.org/sqlite")
+type DB struct{db *sql.DB}
+type Item struct{
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Description string `json:"description"`
+	Status string `json:"status"`
+	Category string `json:"category"`
+	Tags string `json:"tags"`
+	CreatedAt string `json:"created_at"`
+}
+func Open(d string)(*DB,error){if err:=os.MkdirAll(d,0755);err!=nil{return nil,err};db,err:=sql.Open("sqlite",filepath.Join(d,"apothecary.db")+"?_journal_mode=WAL&_busy_timeout=5000");if err!=nil{return nil,err}
+db.Exec(`CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT DEFAULT '',status TEXT DEFAULT 'active',category TEXT DEFAULT '',tags TEXT DEFAULT '',created_at TEXT DEFAULT(datetime('now')))`)
+return &DB{db:db},nil}
+func(d *DB)Close()error{return d.db.Close()}
+func genID()string{return fmt.Sprintf("%d",time.Now().UnixNano())}
+func now()string{return time.Now().UTC().Format(time.RFC3339)}
+func(d *DB)Create(e *Item)error{e.ID=genID();e.CreatedAt=now();_,err:=d.db.Exec(`INSERT INTO items(id,name,description,status,category,tags,created_at)VALUES(?,?,?,?,?,?,?)`,e.ID,e.Name,e.Description,e.Status,e.Category,e.Tags,e.CreatedAt);return err}
+func(d *DB)Get(id string)*Item{var e Item;if d.db.QueryRow(`SELECT id,name,description,status,category,tags,created_at FROM items WHERE id=?`,id).Scan(&e.ID,&e.Name,&e.Description,&e.Status,&e.Category,&e.Tags,&e.CreatedAt)!=nil{return nil};return &e}
+func(d *DB)List()[]Item{rows,_:=d.db.Query(`SELECT id,name,description,status,category,tags,created_at FROM items ORDER BY created_at DESC`);if rows==nil{return nil};defer rows.Close();var o []Item;for rows.Next(){var e Item;rows.Scan(&e.ID,&e.Name,&e.Description,&e.Status,&e.Category,&e.Tags,&e.CreatedAt);o=append(o,e)};return o}
+func(d *DB)Delete(id string)error{_,err:=d.db.Exec(`DELETE FROM items WHERE id=?`,id);return err}
+func(d *DB)Count()int{var n int;d.db.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&n);return n}
